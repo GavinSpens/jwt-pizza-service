@@ -76,6 +76,8 @@ franchiseRouter.docs = [
   },
 ];
 
+linterror;
+
 // getFranchises
 franchiseRouter.get(
   "/",
