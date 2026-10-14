@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "start": "cd src && node index.js",
+    "start": "DB_NAME=pizza cd src && node index.js",
     "test": "DB_NAME=pizza_test jest --coverage",
     "lint": "eslint ."
   },

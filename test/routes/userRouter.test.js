@@ -100,6 +100,31 @@ test("user updates their own profile", async () => {
   });
 });
 
+test("user can keep the same email when updating their own profile", async () => {
+  const [userToUpdate, userToUpdateToken] = await registerUser(request(app));
+  const response = await request(app)
+    .put(`/api/user/${userToUpdate.id}`)
+    .set("Authorization", "Bearer " + userToUpdateToken)
+    .send({ name: "same email user", email: userToUpdate.email });
+
+  expect(response.status).toBe(200);
+  expect(response.body.user).toMatchObject({
+    id: userToUpdate.id,
+    name: "same email user",
+    email: userToUpdate.email,
+  });
+});
+
+test("reject updating a user with an email already in use", async () => {
+  const response = await request(app)
+    .put(`/api/user/${user.id}`)
+    .set("Authorization", `Bearer ${userToken}`)
+    .send({ email: otherUser.email });
+
+  expect(response.status).toBe(409);
+  expect(response.body.message).toBe("email already exists");
+});
+
 test("admin updates another user", async () => {
   const response = await request(app)
     .put(`/api/user/${otherUser.id}`)
@@ -133,24 +158,68 @@ test("reject unauthenticated profile updates", async () => {
   expect(response.body.message).toBe("unauthorized");
 });
 
-test("return the user deletion placeholder", async () => {
+test("delete user", async () => {
   const response = await request(app)
     .delete(`/api/user/${user.id}`)
     .set("Authorization", `Bearer ${userToken}`);
 
   expect(response.status).toBe(200);
-  expect(response.body).toEqual({ message: "not implemented" });
+  expect(response.body.message).toBe("user deleted");
+
+  const loginResponse = await request(app).put("/api/auth").send({
+    email: user.email,
+    password: user.password,
+  });
+  expect(loginResponse.status).toBe(404);
+  expect(loginResponse.body.message).toBe("unknown user");
 });
 
-test("return the user listing placeholder", async () => {
+test("silently don't delete nonexistent user", async () => {
   const response = await request(app)
-    .get("/api/user")
-    .set("Authorization", `Bearer ${userToken}`);
+    .delete("/api/user/2147483647")
+    .set("Authorization", `Bearer ${adminToken}`);
 
   expect(response.status).toBe(200);
-  expect(response.body).toEqual({
-    message: "not implemented",
-    users: [],
-    more: false,
-  });
+  expect(response.body.message).toBe("user deleted");
 });
+
+test("list users unauthorized", async () => {
+  const listUsersRes = await request(app).get("/api/user");
+  expect(listUsersRes.status).toBe(401);
+});
+
+test("list users", async () => {
+  const [user, userToken] = await registerUser(request(app));
+
+  // fix lint error: 'user' is assigned a value but never used
+  expect(user).toEqual(user);
+
+  const listUsersRes = await request(app)
+    .get("/api/user")
+    .set("Authorization", "Bearer " + userToken);
+  expect(listUsersRes.status).toBe(403);
+
+  const listUsersAdminRes = await request(app)
+    .get("/api/user")
+    .query({ name: user.name })
+    .set("Authorization", "Bearer " + adminToken);
+  expect(listUsersAdminRes.status).toBe(200);
+  expect(listUsersAdminRes.body.users).toHaveLength(1);
+  expect(listUsersAdminRes.body.users[0]).toMatchObject({
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    roles: [{ role: Role.Diner }],
+  });
+  expect(listUsersAdminRes.body.more).toBe(false);
+});
+
+async function registerUser(service) {
+  const testUser = {
+    name: `pizza diner ${randomName()}`,
+    email: `${randomName()}@test.com`,
+    password: "a",
+  };
+  const registerRes = await service.post("/api/auth").send(testUser);
+  return [registerRes.body.user, registerRes.body.token];
+}

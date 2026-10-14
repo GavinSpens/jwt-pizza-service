@@ -33,6 +33,36 @@ class DB {
     }
   }
 
+  async listUsers(page = 1, limit = 10, nameFilter = "*") {
+    const connection = await this.getConnection();
+    try {
+      const offset = this.getOffset(page, limit);
+      nameFilter = nameFilter.replace(/\*/g, "%");
+      const users = await this.query(
+        connection,
+        `SELECT id, name, email FROM user WHERE name LIKE ? LIMIT ${limit + 1} OFFSET ${offset}`,
+        [nameFilter],
+      );
+      const more = users.length > limit;
+      if (more) {
+        users.pop();
+      }
+      for (const user of users) {
+        const roleResult = await this.query(
+          connection,
+          `SELECT * FROM userRole WHERE userId=?`,
+          [user.id],
+        );
+        user.roles = roleResult.map((r) => {
+          return { objectId: r.objectId || undefined, role: r.role };
+        });
+      }
+      return [users, more];
+    } finally {
+      connection.end();
+    }
+  }
+
   async addUser(user) {
     const connection = await this.getConnection();
     try {
@@ -124,6 +154,16 @@ class DB {
   async updateUser(userId, name, email, password) {
     const connection = await this.getConnection();
     try {
+      const userResult = await this.query(
+        connection,
+        `SELECT email FROM user WHERE id=?`,
+        [userId],
+      );
+      if (userResult.length === 0) {
+        throw new StatusCodeError("unknown user", 404);
+      }
+
+      const currentEmail = userResult[0].email;
       const updates = [];
       const params = [];
       if (password) {
@@ -132,6 +172,9 @@ class DB {
         params.push(hashedPassword);
       }
       if (email) {
+        if (email !== currentEmail && (await this.userExists(email))) {
+          throw new StatusCodeError("email already exists", 409);
+        }
         updates.push("email=?");
         params.push(email);
       }
@@ -148,15 +191,7 @@ class DB {
         );
       }
 
-      const userResult = await this.query(
-        connection,
-        `SELECT email FROM user WHERE id=?`,
-        [userId],
-      );
-      if (userResult.length === 0) {
-        throw new StatusCodeError("unknown user", 404);
-      }
-      return await this.getUser(userResult[0].email, password);
+      return await this.getUser(email || currentEmail, password);
     } finally {
       connection.end();
     }
@@ -519,6 +554,19 @@ class DB {
       [config.db.connection.database],
     );
     return rows.length > 0;
+  }
+
+  async deleteUser(userId) {
+    const connection = await this.getConnection();
+    try {
+      await this.query(connection, `DELETE FROM userRole WHERE userId=?`, [
+        userId,
+      ]);
+      await this.query(connection, `DELETE FROM auth WHERE userId=?`, [userId]);
+      await this.query(connection, `DELETE FROM user WHERE id=?`, [userId]);
+    } finally {
+      connection.end();
+    }
   }
 }
 
