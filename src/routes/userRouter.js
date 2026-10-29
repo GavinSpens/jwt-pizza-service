@@ -21,6 +21,7 @@ userRouter.docs = [
           roles: [{ role: "admin" }],
         },
       ],
+      more: false,
     },
   },
   {
@@ -61,7 +62,7 @@ userRouter.docs = [
     response: {
       message: "user deleted",
     },
-  }
+  },
 ];
 
 // getUser
