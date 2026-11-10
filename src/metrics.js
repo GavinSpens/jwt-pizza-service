@@ -4,9 +4,36 @@ const os = require("os");
 // Metrics stored in memory
 const requests = {};
 let pizzaPurchasedCount = 0;
+let totalRevenue = 0;
+let lastUserActivity = {};
+let requestCount = 0;
+let latencySum = 0;
+let pizzaRequestCount = 0;
+let pizzaLatencySum = 0;
+let successfulAuthAttempts = 0;
+let failedAuthAttempts = 0;
+const userActivityTimeout = 5 * 60 * 1000; // 5 minutes
 
-function pizzaPurchased() {
-  pizzaPurchasedCount++;
+function pizzaPurchased(order) {
+  order.items.forEach((item) => {
+    pizzaPurchasedCount++;
+    totalRevenue += item.price;
+  });
+}
+
+function trackPizzaCreationLatency(startTime) {
+  const latency = Date.now() - startTime;
+  pizzaRequestCount++;
+  pizzaLatencySum += latency;
+}
+
+function getActiveUserCount() {
+  for (const userId in lastUserActivity) {
+    if (Date.now() - lastUserActivity[userId] > userActivityTimeout) {
+      delete lastUserActivity[userId];
+    }
+  }
+  return Object.keys(lastUserActivity).length;
 }
 
 function getCpuUsagePercentage() {
@@ -29,6 +56,38 @@ function requestTracker(req, res, next) {
   next();
 }
 
+// Middleware to track request latency
+function trackRequestLatency(req, res, next) {
+  const start = Date.now();
+  res.on("finish", () => {
+    const latency = Date.now() - start;
+    requestCount++;
+    latencySum += latency;
+  });
+  next();
+}
+
+// Middleware to track user activity
+function trackUserActivity(req, res, next) {
+  const userId = req.user?.id;
+  if (userId) {
+    lastUserActivity[userId] = Date.now();
+  }
+  next();
+}
+
+// Middleware to track auth attempts
+function trackAuthAttempts(req, res, next) {
+  if (req.user?.id) {
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      successfulAuthAttempts++;
+    } else {
+      failedAuthAttempts++;
+    }
+  }
+  next();
+}
+
 // Periodically send metrics to Grafana
 setInterval(() => {
   const metrics = [];
@@ -39,6 +98,42 @@ setInterval(() => {
       }),
     );
   });
+
+  const intervalCount = requestCount;
+  const intervalSum = latencySum;
+  requestCount = 0;
+  latencySum = 0;
+
+  metrics.push(
+    createMetric(
+      "averageLatency",
+      intervalCount > 0 ? intervalSum / intervalCount : 0,
+      "ms",
+      "gauge",
+      "asDouble",
+      {},
+    ),
+  );
+
+  const pizzaIntervalCount = pizzaRequestCount;
+  const pizzaIntervalSum = pizzaLatencySum;
+  pizzaRequestCount = 0;
+  pizzaLatencySum = 0;
+
+  metrics.push(
+    createMetric(
+      "averagePizzaCreationLatency",
+      pizzaIntervalCount > 0 ? pizzaIntervalSum / pizzaIntervalCount : 0,
+      "ms",
+      "gauge",
+      "asDouble",
+      {},
+    ),
+  );
+
+  metrics.push(
+    createMetric("activeUsers", getActiveUserCount(), "1", "sum", "asInt", {}),
+  );
 
   metrics.push(
     createMetric(
@@ -66,6 +161,39 @@ setInterval(() => {
     createMetric(
       "pizzaPurchased",
       pizzaPurchasedCount,
+      "1",
+      "sum",
+      "asInt",
+      {},
+    ),
+  );
+
+  metrics.push(
+    createMetric(
+      "totalRevenue",
+      totalRevenue,
+      "BTC",
+      "sum",
+      "asDouble",
+      {},
+    ),
+  );
+
+  metrics.push(
+    createMetric(
+      "successfulAuthAttempts",
+      successfulAuthAttempts,
+      "1",
+      "sum",
+      "asInt",
+      {},
+    ),
+  );
+
+  metrics.push(
+    createMetric(
+      "failedAuthAttempts",
+      failedAuthAttempts,
       "1",
       "sum",
       "asInt",
@@ -147,4 +275,11 @@ function sendMetricToGrafana(metrics) {
     });
 }
 
-module.exports = { requestTracker, pizzaPurchased };
+module.exports = {
+  requestTracker,
+  pizzaPurchased,
+  trackUserActivity,
+  trackAuthAttempts,
+  trackRequestLatency,
+  trackPizzaCreationLatency,
+};
