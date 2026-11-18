@@ -1,5 +1,6 @@
 const express = require("express");
 const metrics = require("./metrics.js");
+const logger = require("./logger.js");
 const { authRouter, setAuthUser } = require("./routes/authRouter.js");
 const orderRouter = require("./routes/orderRouter.js");
 const franchiseRouter = require("./routes/franchiseRouter.js");
@@ -14,6 +15,7 @@ app.use(setAuthUser);
 app.use(metrics.trackUserActivity);
 app.use(metrics.trackAuthAttempts);
 app.use(metrics.trackRequestLatency);
+app.use(logger.httpLogger);
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE");
